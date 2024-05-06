@@ -17,12 +17,15 @@ jobs:
     env:
       TEST_XIRCUITS: |
         examples/mongodb-example.xircuits
-      MONGO_DB: example-db
-      MONGO_COLLECTION: example-collection
 
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v3
+
+    - name: Start MongoDB
+      uses: supercharge/mongodb-github-action@1.10.0
+      with:
+        mongodb-version: 'latest'
 
     - name: Install xircuits
       run: pip install xircuits
@@ -39,14 +42,9 @@ jobs:
           echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
         fi
 
-    - name: Install MongoDB Tools
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y mongodb-clients
-
     - name: Create MongoDB Database and Collection
       run: |
-        mongo --eval "db = db.getSiblingDB('${{ env.MONGO_DB }}'); db.createCollection('${{ env.MONGO_COLLECTION }}')"
+        mongo --eval "db = db.getSiblingDB('example-db'); db.createCollection('example-collection')"
 
     - name: List Xircuits
       run: xircuits list 
