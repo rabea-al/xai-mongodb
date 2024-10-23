@@ -5,15 +5,15 @@ on:
     branches: [ main ]
   pull_request:
     branches: "*"
+  workflow_dispatch:
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-    services:
-      mongo:
-        image: mongo
-        ports:
-          - 27017:27017
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
     env:
       TEST_XIRCUITS: |
         examples/mongodb-example.xircuits
@@ -22,12 +22,19 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v3
 
-    - name: Start MongoDB
-      uses: supercharge/mongodb-github-action@1.10.0
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
       with:
-        mongodb-version: 'latest'
+        python-version: ${{ matrix.python-version }}
 
-    - name: Install xircuits
+    - name: Create virtual environment
+      run: |
+        python -m venv venv
+        echo "${{ github.workspace }}/venv/bin" >> $GITHUB_PATH
+        source venv/bin/activate
+        pip install --upgrade pip
+
+    - name: Install xircuits in virtual environment
       run: pip install xircuits
 
     - name: Set Environment Variables
@@ -42,15 +49,18 @@ jobs:
           echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
         fi
 
-    - name: Create MongoDB Database and Collection
-      run: |
-        mongo --eval "db = db.getSiblingDB('example-db'); db.createCollection('example-collection')"
-
     - name: List Xircuits
-      run: xircuits list 
+      run: xircuits list
 
     - name: Clone Repository
-      run: git clone -b ${{ env.BRANCH_NAME }} https://github.com/${{ github.repository }} ${{ env.COMPONENT_LIBRARY_PATH }}
+      run: |
+        rm -rf ${{ env.COMPONENT_LIBRARY_PATH }}
+        if [ "${{ github.event_name }}" == "pull_request" ]; then
+          REPO_URL="${{ github.event.pull_request.head.repo.clone_url }}"
+        else
+          REPO_URL="https://github.com/${{ github.repository }}"
+        fi
+        git clone -b ${{ env.BRANCH_NAME }} $REPO_URL ${{ env.COMPONENT_LIBRARY_PATH }}
 
     - name: Install Component Library
       run: |
@@ -60,6 +70,20 @@ jobs:
         else
           echo "requirements.txt not found."
         fi
+
+    - name: Install MongoDB
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gnupg
+        wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo tee /etc/apt/trusted.gpg.d/mongodb-server-6.0.asc
+        echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+        sudo apt-get update
+        sudo apt-get install -y mongodb-org
+        sudo systemctl enable mongod
+        sudo systemctl start mongod
+
+      
+
 
     - name: Test .xircuits Workflows
       run: |
@@ -101,10 +125,11 @@ jobs:
         else 
           echo "Workflow processing completed" | tee -a $LOG_FILE
         fi
+  
 
     - name: Upload log file
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.LIBRARY_NAME }}-validation-workflow
+        name: ${{ env.LIBRARY_NAME }}-validation-workflow-${{ matrix.python-version }}
         path: ${{ github.workspace }}/workflow_logs.txt
